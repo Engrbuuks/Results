@@ -300,7 +300,7 @@ select.fld{cursor:pointer;font-family:var(--f-b)}
 <div id="mask" class="mask hide"></div>
 <div id="toast" class="toast hide"></div>
 <script>/* The AMBO Election Incidence Manager — results intake */
-var CFG = { mode:'DEMO', backendUrl:'', secret:'', token:'' };
+var CFG = { mode:'LIVE', backendUrl:'https://script.google.com/macros/s/AKfycbyeOu-G2OhEOwBsfILj6Nm07AAUeyHR4w9nn1SFDdGPqhun_15H8Nub_RaXB5y51-7T/exec', secret:'ambo2026', token:'' };
 var BUILT_IN=false;
 function live(){ return CFG.mode==='LIVE' && !!CFG.backendUrl; }
 function noteBuild(){ BUILT_IN = (CFG.mode==='LIVE' && !!CFG.backendUrl); }
