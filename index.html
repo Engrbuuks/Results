@@ -213,6 +213,60 @@ select.fld{cursor:pointer;font-family:var(--f-b)}
 .bravo-foot .lgwrap{background:#fff;border:1px solid var(--ln);border-radius:12px;padding:9px 18px;box-shadow:var(--sh)}
 .bravo-foot .lgwrap img{height:42px;width:auto;display:block}
 .bravo-foot .bl{font-size:10.5px;color:var(--tx-3);font-style:italic}
+
+.send button.replacing{background:var(--amber);box-shadow:0 4px 16px rgba(240,165,0,.3)}
+.warn b{display:block;margin-bottom:2px}
+
+.done .again.quiet{background:#fff;border:1px solid var(--ln-2);color:var(--tx-2)}
+
+/* ══ motion ══
+   The app is used standing up, in a hurry, sometimes in poor light. Movement is
+   there to confirm a tap landed and to make the running total feel live —
+   nothing decorative. */
+@keyframes rise{from{opacity:0;transform:translateY(12px)}to{opacity:1;transform:none}}
+@keyframes fade{from{opacity:0}to{opacity:1}}
+@keyframes pop{0%{transform:scale(1)}45%{transform:scale(1.07)}100%{transform:scale(1)}}
+@keyframes tickIn{0%{transform:scale(.4);opacity:0}60%{transform:scale(1.12);opacity:1}100%{transform:scale(1)}}
+@keyframes slideUp{from{transform:translateY(24px);opacity:0}to{transform:none;opacity:1}}
+@keyframes barGrow{from{width:0}}
+
+#view-entry .sec,#view-entry > .pad > div{animation:fade .3s both}
+.party{animation:rise .34s cubic-bezier(.22,.9,.3,1) both}
+.party:nth-child(2){animation-delay:.04s}
+.party:nth-child(3){animation-delay:.08s}
+.party:nth-child(4){animation-delay:.12s}
+.party:nth-child(5){animation-delay:.16s}
+.ui{animation:rise .3s cubic-bezier(.22,.9,.3,1) both}
+.ui:nth-child(2){animation-delay:.04s}
+.ui:nth-child(3){animation-delay:.08s}
+.ui:nth-child(4){animation-delay:.12s}
+
+.party,.ty,.sv,.ui{transition:transform .13s ease,border-color .16s ease,background .16s ease}
+.party:active,.ui:active{transform:scale(.985)}
+.sv:active,.ty:active{transform:scale(.96)}
+.send button{transition:transform .13s ease,background .2s ease,box-shadow .2s ease}
+.send button:active:not(:disabled){transform:scale(.98)}
+.party.lead{transition:border-color .2s ease,box-shadow .2s ease}
+
+/* the running total is the number an agent watches, so it reacts */
+.tally .v{transition:color .2s ease}
+.tally .v.bumped{animation:pop .4s cubic-bezier(.3,1.4,.5,1)}
+.cnt .v{transition:color .2s ease}
+
+.prog .fill{transition:width .5s cubic-bezier(.22,.9,.3,1)}
+.done .tick{animation:tickIn .5s cubic-bezier(.3,1.4,.5,1) both}
+.done h2{animation:rise .4s .1s both}
+.done p,.done .box,.done .again{animation:rise .4s .18s both}
+.done .lrow{animation:fade .4s both}
+.sheetup .pn{animation:slideUp .26s cubic-bezier(.22,.9,.3,1)}
+.warn{animation:rise .26s both}
+.toast{animation:slideUp .22s cubic-bezier(.22,.9,.3,1)}
+.a-cta{transition:transform .13s ease,opacity .2s ease}
+.a-cta:active:not(:disabled){transform:scale(.98)}
+
+@media(prefers-reduced-motion:reduce){
+  *,*:before,*:after{animation:none!important;transition:none!important}
+}
 </style></head><body>
 
 <div id="auth"><div class="wrap">
@@ -289,8 +343,8 @@ select.fld{cursor:pointer;font-family:var(--f-b)}
   <section id="view-done" class="hide">
     <div class="done">
       <div class="tick"><svg viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5"/></svg></div>
-      <h2>Result recorded</h2>
-      <p>The collation desk has it. You can correct it by entering the unit again.</p>
+      <h2 id="done-head">Result recorded</h2>
+      <p id="done-sub">The collation desk has it.</p>
       <div class="box" id="d-box"></div>
       <button class="again" id="again">Enter another polling unit</button>
     </div>
@@ -347,7 +401,7 @@ var I={
  box:'<svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 10h18"/></svg>'
 };
 
-var S={ agent:null, units:[], parties:DEMO_PARTIES.slice(), filed:[], view:'units',
+var S={ agent:null, units:[], confirmedReplace:false, hadPhoto:false, parties:DEMO_PARTIES.slice(), filed:[], view:'units',
         unit:null, counts:{registered:'',accredited:'',rejected:''}, votes:{},
         photo:null, gps:null, sending:false, last:null };
 var QUEUE=[];
@@ -480,13 +534,40 @@ function askGps(){
 /* ── units ── */
 function filedFor(code){
   var q=QUEUE.filter(function(r){ return r.body.puCode===code; }).pop();
-  if(q) return {at:q.at, sent:q.sent, votes:q.body.votes};
+  if(q) return {at:q.at, sent:q.sent, votes:q.body.votes, mine:true};
+  var u=(S.units||[]).filter(function(x){ return x.puCode===code; })[0];
+  if(u&&u.entered) return {at:u.entered.at, sent:true, votes:u.entered.votes,
+                           by:u.entered.by, level:u.entered.level, mine:false};
   return S.filed.filter(function(f){ return f.puCode===code; })[0]||null;
 }
-function pickUnit(u){ S.unit=u; S.view='entry';
-  var prev=filedFor(u.puCode);
+/** Whether sending would replace figures somebody else already entered. */
+function standingEntry(code){
+  var u=(S.units||[]).filter(function(x){ return x.puCode===code; })[0];
+  if(!u||!u.entered) return null;
+  if(QUEUE.some(function(r){ return r.body.puCode===code; })) return null;   // my own, already
+  return u.entered;
+}
+function pickUnit(u){
+  LASTVALID=null;
+  S.unit=u; S.view='entry'; S.confirmedReplace=false;
   S.counts={registered:'',accredited:'',rejected:''}; S.votes={}; S.photo=null;
-  if(prev&&prev.votes) S.parties.forEach(function(p){ if(prev.votes[p.code]) S.votes[p.code]=String(prev.votes[p.code]); });
+  // Everything that was entered comes back — the register and accredited count
+  // as much as the party figures. Losing them means retyping the whole form to
+  // correct one number.
+  var mine=QUEUE.filter(function(r){ return r.body.puCode===u.puCode; }).pop();
+  var prev = mine ? { votes:mine.body.votes, registered:mine.body.registered,
+                      accredited:mine.body.accredited, rejected:mine.body.rejected,
+                      photo:mine.body.photo }
+                  : (u.entered || null);
+  if(prev){
+    S.parties.forEach(function(p){
+      if(prev.votes && prev.votes[p.code]) S.votes[p.code]=String(prev.votes[p.code]); });
+    if(prev.registered) S.counts.registered=String(prev.registered);
+    if(prev.accredited) S.counts.accredited=String(prev.accredited);
+    if(prev.rejected)   S.counts.rejected=String(prev.rejected);
+    if(prev.photo && /^data:/.test(prev.photo)) S.photo=prev.photo;
+    S.hadPhoto = !!prev.photo;
+  } else S.hadPhoto=false;
   renderAll(); window.scrollTo(0,0);
 }
 
@@ -495,6 +576,24 @@ function renderAll(){ if(!S.agent) return;
   renderWho(); renderStatus(); renderProgress(); renderUnits(); renderEntry(); renderDone(); renderView(); }
 function renderDone(){
   var el=document.getElementById('d-box'); if(!el||!S.last) return;
+  // A polling unit agent has one unit and is finished. A ward collator has more
+  // to do, so the screen should point them at what is left.
+  var one = S.agent.level==='PU' || S.units.length<=1;
+  var done=S.units.filter(function(u){ return !!filedFor(u.puCode); }).length;
+  var left=S.units.length-done;
+  var h=document.getElementById('done-head');
+  var p=document.getElementById('done-sub');
+  var b=document.getElementById('again');
+  if(h) h.textContent = one ? 'Result sent' : (left ? 'Result recorded' : 'Every unit is in');
+  if(p) p.innerHTML = one
+    ? 'The collation desk has your result for <b>'+esc(S.last.unit.puName||S.last.unit.puCode)+
+      '</b>. That is your polling unit done.<br>If a figure was wrong, open the unit again and send the corrected result.'
+    : (left ? 'The desk has it. '+left+' polling unit'+(left>1?'s':'')+' in '+esc(S.agent.ward)+' still to go.'
+            : 'Every polling unit in '+esc(S.agent.ward)+' has now been sent.');
+  if(b){
+    b.textContent = one ? 'Check my result' : (left ? 'Enter the next polling unit' : 'Review the ward');
+    b.classList.toggle('quiet', one && !left);
+  }
   var rows=S.parties.map(function(p){ return {p:p, v:S.last.votes[p.code]||0}; })
     .filter(function(r){ return r.v>0; })
     .sort(function(a,b){ return b.v-a.v; });
@@ -548,7 +647,10 @@ function renderUnits(){
   if(!S.units.length){ el.innerHTML='<div class="empty"><b>No polling units assigned</b>Ask the desk to check your record.</div>'; return; }
   el.innerHTML=S.units.map(function(u){
     var f=filedFor(u.puCode);
-    var sub=f ? (f.sent===false?'Waiting to send':'Entered'+(f.at?' at '+hhmm(new Date(f.at)):'')) : 'Not entered yet';
+    var sub=f ? (f.sent===false?'Waiting to send'
+                : (f.by ? 'Entered by '+f.by+(f.at?' at '+hhmm(new Date(f.at)):'')
+                        : 'Entered'+(f.at?' at '+hhmm(new Date(f.at)):'')))
+              : 'Not entered yet';
     return '<button class="ui" data-unit="'+esc(u.puCode)+'">'+
       '<span class="i '+(f?'done':'todo')+'">'+(f?I.tick:I.box)+'</span>'+
       '<span class="m"><span class="t">'+esc(u.puName||u.puCode)+'</span>'+
@@ -563,9 +665,16 @@ function partyBadge(p){
 }
 function renderEntry(){
   if(S.view!=='entry'||!S.unit) return;
+  var std=standingEntry(S.unit.puCode);
   document.getElementById('e-unit').innerHTML=
     '<div class="fixed">'+I.pin+'<div>'+esc(S.unit.puName||S.unit.puCode)+
-    '<span class="mono">'+esc(S.unit.puCode)+' · '+esc(S.agent.lga)+' · '+esc(S.unit.ward||S.agent.ward)+'</span></div></div>';
+    '<span class="mono">'+esc(S.unit.puCode)+' · '+esc(S.agent.lga)+' · '+esc(S.unit.ward||S.agent.ward)+'</span></div></div>'+
+    (std ? '<div class="warn" style="margin-top:11px">'+I.warn+
+      '<div><b>'+esc(std.by||'Someone')+' already entered this unit'+
+      (std.at?' at '+hhmm(new Date(std.at)):'')+'</b>'+
+      '<div style="margin-top:6px">'+S.parties.filter(function(p){ return (std.votes||{})[p.code]; })
+        .map(function(p){ return esc(p.code)+' '+fmt(std.votes[p.code]); }).join(' &middot; ')+
+      '</div><div style="margin-top:6px">Sending will replace those figures. The originals are kept and the desk is told.</div></div></div>' : '');
 
   document.getElementById('e-counts').innerHTML=
     cnt('registered','Registered voters')+
@@ -607,7 +716,10 @@ function renderPhoto(){
   var el=document.getElementById('e-photo'); if(!el) return;
   if(!S.photo){
     el.innerHTML='<button class="photo" id="photo-btn">'+I.cam+
-      '<div class="t">Photograph the result sheet</div><div class="s">Form EC8A — the desk can check your figures against it</div></button>'+
+      '<div class="t">'+(S.hadPhoto?'Photograph it again':'Photograph the result sheet')+'</div>'+
+      '<div class="s">'+(S.hadPhoto
+        ? 'The desk already has a photo for this unit. A new one replaces it; leaving this blank keeps the original.'
+        : 'Form EC8A — the desk can check your figures against it')+'</div></button>'+
       '<input type="file" id="photo-in" accept="image/*" capture="environment" class="hide">';
     return;
   }
@@ -619,7 +731,9 @@ function renderSend(){
   var pr=problems();
   var ok=!pr.hard.length && !S.sending;
   b.disabled=!ok;
-  b.innerHTML=I.send+(S.sending?'Sending…':'Send result');
+  var std=S.unit?standingEntry(S.unit.puCode):null;
+  b.innerHTML=I.send+(S.sending?'Sending…':(std?'Replace this result':'Send result'));
+  b.classList.toggle('replacing',!!std&&!S.sending);
   document.getElementById('sendhint').textContent= pr.hard.length ? pr.hard[0]
     : (navigator.onLine ? 'Goes straight to the collation desk'
                         : 'Saved on this phone and sent when signal returns');
@@ -652,6 +766,9 @@ function pickPhoto(file){
 function submit(){
   var pr=problems();
   if(pr.hard.length||S.sending) return;
+  var std=standingEntry(S.unit.puCode);
+  if(std && !S.confirmedReplace){ confirmReplace(std); return; }
+  S.confirmedReplace=false;
   S.sending=true; renderSend();
   var votes={}; S.parties.forEach(function(p){ votes[p.code]=num(S.votes[p.code]); });
   var body={ ref:ref(), puCode:S.unit.puCode, puName:S.unit.puName,
@@ -667,10 +784,36 @@ function submit(){
   renderAll(); flush();
 }
 function again(){
-  S.unit=null; S.photo=null; S.counts={registered:'',accredited:'',rejected:''}; S.votes={};
-  S.view = (S.agent.level==='PU'&&S.units.length===1) ? 'entry' : 'units';
-  if(S.view==='entry') pickUnit(S.units[0]); else renderAll();
+  S.photo=null; S.counts={registered:'',accredited:'',rejected:''}; S.votes={};
+  S.confirmedReplace=false;
+  if(S.agent.level==='PU'||S.units.length<=1){
+    // back to their own unit, showing what they sent so they can check it
+    pickUnit(S.units[0]);
+  } else {
+    S.unit=null; S.view='units'; renderAll();
+  }
   window.scrollTo(0,0);
+}
+
+function confirmReplace(std){
+  var m=document.getElementById('mask');
+  m.className='sheetup';
+  m.innerHTML='<div class="sc" data-close></div><div class="pn"><span class="grab"></span>'+
+    '<h3>Replace '+esc(std.by||'this')+'\u2019s entry?</h3>'+
+    '<div class="sub">This polling unit was already entered'+
+      (std.by?' by '+esc(std.by):'')+(std.at?' at '+hhmm(new Date(std.at)):'')+
+      '. Your figures will stand instead. The originals are kept and the desk can see both.</div>'+
+    '<div class="statline"><span class="m"><span class="t">Already entered</span><span class="s">'+
+      S.parties.filter(function(p){ return (std.votes||{})[p.code]; })
+        .map(function(p){ return esc(p.code)+' '+fmt(std.votes[p.code]); }).join(' &middot; ')+
+      '</span></span></div>'+
+    '<div class="statline"><span class="m"><span class="t">Yours</span><span class="s">'+
+      S.parties.filter(function(p){ return num(S.votes[p.code]); })
+        .map(function(p){ return esc(p.code)+' '+fmt(num(S.votes[p.code])); }).join(' &middot; ')+
+      '</span></span></div>'+
+    '<div class="actrow"><button id="rep-no">Leave it as it is</button>'+
+    '<button class="dgr" id="rep-yes">Replace it</button></div></div>';
+  m.classList.remove('hide');
 }
 
 /* ── panel ── */
@@ -731,6 +874,8 @@ document.addEventListener('click',function(e){
   if(t.closest('#photo-btn')){ document.getElementById('photo-in').click(); return; }
   if(t.closest('#photo-x')){ S.photo=null; renderPhoto(); return; }
   if(t.closest('#sendbtn')){ submit(); return; }
+  if(t.closest('#rep-no')){ closePanel(); return; }
+  if(t.closest('#rep-yes')){ closePanel(); S.confirmedReplace=true; submit(); return; }
   if(t.closest('#again')){ again(); return; }
   if(t.closest('#menubtn')||t.closest('#statusbtn')){ openPanel(); return; }
   if(t.closest('#p-refresh')){ refreshNow(t.closest('#p-refresh')); return; }
@@ -749,6 +894,7 @@ document.addEventListener('input',function(e){
 document.addEventListener('change',function(e){ if(e.target.id==='photo-in') pickPhoto(e.target.files[0]); });
 
 /** Updates the tally without redrawing the inputs, so focus is never lost. */
+var LASTVALID=null;
 function liveUpdate(){
   var reg=num(S.counts.registered), acc=num(S.counts.accredited);
   var v=document.getElementById('e-valid'); if(v) v.textContent=fmt(validVotes());
@@ -763,6 +909,12 @@ function liveUpdate(){
   else if(pr.soft.length){ w.className='warn'; w.classList.remove('hide');
     w.innerHTML=I.warn+'<div><b>Check before sending</b><ul>'+pr.soft.map(function(x){return '<li>'+esc(x)+'</li>';}).join('')+'</ul></div>'; }
   else w.classList.add('hide');
+  // nudge the running total when it actually moves, so the agent sees it land
+  var tv=document.querySelector('#e-tally .v');
+  if(tv && LASTVALID!==null && LASTVALID!==validVotes()){
+    tv.classList.remove('bumped'); void tv.offsetWidth; tv.classList.add('bumped');
+  }
+  LASTVALID=validVotes();
   var lead=leader();
   Array.prototype.forEach.call(document.querySelectorAll('.party'),function(el){
     var code=el.querySelector('[data-party]').dataset.party;
